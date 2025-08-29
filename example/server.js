@@ -24,6 +24,20 @@ const server = http.createServer((req, res) => {
     filePath = './index.html';
   }
 
+  // Serve SQLite files from assets directory
+  const sqliteFiles = [
+    'sqlite3.wasm',
+    'sqlite3.js',
+    'sqlite3-worker1.js',
+    'sqlite3-worker1-promiser.js',
+    'sqlite3-opfs-async-proxy.js'
+  ];
+
+  const fileName = path.basename(filePath);
+  if (sqliteFiles.includes(fileName)) {
+    filePath = path.join('..', 'assets', fileName);
+  }
+
   const extname = path.extname(filePath);
   const contentType = mimeTypes[extname] || 'application/octet-stream';
 
@@ -49,5 +63,6 @@ server.listen(PORT, HOST, () => {
   console.log(`🌐 Server running at http://${HOST}:${PORT}/`);
   console.log('✅ CORS headers enabled for SharedArrayBuffer support');
   console.log('✅ OPFS support enabled on localhost');
+  console.log('📂 Serving SQLite files from ../assets/');
   console.log('📝 Press Ctrl+C to stop\n');
 });

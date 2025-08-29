@@ -176,45 +176,6 @@ func createWorker(opts *Options) (js.Value, *internal.Queue, error) {
 	return bridge, nil, nil
 }
 
-// createEmbeddedWorker creates a Worker from embedded JavaScript
-func createEmbeddedWorker() (js.Value, error) {
-	// Check if workerJS is available
-	if len(workerJS) == 0 {
-		return js.Null(), fmt.Errorf("embedded worker JS is empty")
-	}
-	
-	// Create Blob from embedded Worker JavaScript
-	uint8Array := js.Global().Get("Uint8Array").New(len(workerJS))
-	js.CopyBytesToJS(uint8Array, workerJS)
-	
-	// Create array for blob constructor
-	array := js.Global().Get("Array").New()
-	array.Call("push", uint8Array)
-	
-	blob := js.Global().Get("Blob").New(array, map[string]interface{}{
-		"type": "application/javascript",
-	})
-	
-	// Check if blob was created successfully
-	if blob.IsNull() {
-		return js.Null(), fmt.Errorf("failed to create blob")
-	}
-	
-	blobURL := js.Global().Get("URL").Call("createObjectURL", blob)
-	blobURLStr := blobURL.String()
-	
-	if blobURLStr == "" || blobURLStr == "undefined" {
-		return js.Null(), fmt.Errorf("failed to create blob URL")
-	}
-	
-	// Create Worker from Blob URL
-	worker := js.Global().Get("Worker").New(blobURL)
-	
-	// Don't revoke the URL immediately - let the Worker load first
-	// We can revoke it later in a cleanup function
-	
-	return worker, nil
-}
 
 // initializeSQLiteBridge initializes the SQLite bridge
 func initializeSQLiteBridge(bridge js.Value) error {

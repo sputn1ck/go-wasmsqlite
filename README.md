@@ -8,10 +8,11 @@ A WebAssembly SQLite driver for Go that enables sqlc-generated code to run in th
 - 💾 Persistent storage using OPFS (Origin Private File System)
 - 🔄 Full transaction support (BEGIN/COMMIT/ROLLBACK)
 - ⚡ Works with any sqlc-generated SQLite code
-- 📦 No JavaScript toolchain required for users
+- 📦 **Embedded SQLite WASM assets** - no manual file copying needed
 - 🔍 VFS detection to know if using OPFS or in-memory storage
 - 💼 Database dump/load functionality for backups and migrations
-- 🏗️ Embedded Worker - no external JavaScript files needed
+- 🏗️ Built-in Web Worker bridge for optimal performance
+- 🌐 Cross-Origin Isolation support for SharedArrayBuffer
 
 ## Requirements
 
@@ -24,6 +25,19 @@ A WebAssembly SQLite driver for Go that enables sqlc-generated code to run in th
 ```bash
 go get github.com/sputn1ck/sqlc-wasm
 ```
+
+## Quick Start
+
+```bash
+# Setup and build everything
+make setup
+make build
+
+# Run the demo
+make serve
+```
+
+Visit http://localhost:8081 to see the demo in action.
 
 ## Usage
 
@@ -47,21 +61,86 @@ func main() {
 }
 ```
 
-## Important Setup Steps
+## Project Structure
+
+```
+sqlc-wasm/
+├── Makefile              # Build automation
+├── go.mod & go.sum      # Go module files
+├── *.go                 # Driver source files
+├── embed.go            # Embedded assets handler
+├── assets/             # Embedded SQLite WASM files
+│   ├── sqlite3.wasm
+│   ├── sqlite3.js
+│   ├── sqlite3-worker1.js
+│   ├── sqlite3-worker1-promiser.js
+│   ├── sqlite3-opfs-async-proxy.js
+│   └── bridge.worker.js
+├── worker/             # TypeScript worker source
+│   ├── src/           # TypeScript source files
+│   ├── dist/          # Built JavaScript (generated)
+│   ├── package.json
+│   └── tsconfig.json
+└── example/           # Demo application
+    ├── main.go        # Demo Go code
+    ├── index.html     # Demo UI
+    ├── server.js      # Dev server with CORS headers
+    └── database/      # SQLC generated code
+```
+
+## Using Embedded Assets
+
+The driver includes embedded SQLite WASM files, eliminating the need to manually download and serve them.
+
+### Option 1: Use the Built-in HTTP Handler
+
+```go
+import "github.com/sputn1ck/sqlc-wasm"
+
+// Create an asset handler with proper CORS headers
+handler := wasmsqlite.NewAssetHandler()
+
+// Serve on /wasm/ path
+http.Handle("/wasm/", http.StripPrefix("/wasm", handler))
+
+// The following files will be available:
+// /wasm/sqlite3.wasm
+// /wasm/sqlite3.js
+// /wasm/sqlite3-worker1.js
+// /wasm/sqlite3-worker1-promiser.js
+// /wasm/sqlite3-opfs-async-proxy.js
+// /wasm/bridge.worker.js
+```
+
+### Option 2: Access Raw Embedded Data
+
+```go
+import "github.com/sputn1ck/sqlc-wasm"
+
+// Access embedded files directly
+wasmBytes := wasmsqlite.SQLite3WASM        // []byte
+jsCode := wasmsqlite.SQLite3JS              // string
+workerCode := wasmsqlite.BridgeWorkerJS     // string
+```
+
+### Option 3: Extract to Filesystem
+
+```go
+// Extract all embedded assets to ./static/
+err := wasmsqlite.ExtractAssets("./static/")
+```
+
+## Manual Setup (Without Embedded Assets)
+
+If you prefer to manage SQLite files manually:
 
 ### 1. Obtain SQLite WASM
-
-Download the official SQLite WASM file from the SQLite project:
 
 ```bash
 # Download SQLite WASM (latest version)
 curl -L https://sqlite.org/2024/sqlite-wasm-3460000.zip -o sqlite-wasm.zip
 unzip sqlite-wasm.zip
 cp sqlite-wasm-*/jswasm/sqlite3.wasm ./web/
-
-# Or use npm/CDN
-npm install @sqlite.org/sqlite-wasm
-cp node_modules/@sqlite.org/sqlite-wasm/sqlite3.wasm ./web/
 ```
 
 ### 2. Build Your Application
@@ -74,42 +153,29 @@ GOOS=js GOARCH=wasm go build -o web/main.wasm ./cmd/app
 cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" ./web/
 ```
 
-### 3. Serve Files Correctly
+### 3. Serve Files with Proper Headers
 
-Your web server must serve these files:
-- `main.wasm` - Your Go application
-- `wasm_exec.js` - Go's WASM support
-- `sqlite3.wasm` - SQLite WebAssembly (MUST be at root path `/sqlite3.wasm`)
+For OPFS and SharedArrayBuffer support, serve with these headers:
 
-### 4. Use HTTPS or localhost
-
-OPFS requires a secure context:
-- ✅ `https://` - Production
-- ✅ `http://localhost` - Development
-- ❌ `http://127.0.0.1` - Won't work
-- ❌ `http://[::]:8080` - Won't work
-
-## Example
-
-See the `example/` directory for a complete working demo:
-
-```bash
-cd example
-make serve  # Serves on http://localhost:8081
+```
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Opener-Policy: same-origin
 ```
 
 ## DSN Options
 
 - `file` - Database file path (default: `/app.db`)
 - `vfs` - Virtual file system (default: `opfs-sahpool`)
-  - `opfs-sahpool` - Persistent storage using OPFS
+  - `opfs-sahpool` - Persistent storage using OPFS with SharedArrayBuffer pool
+  - `opfs` - Standard OPFS storage
   - `:memory:` - In-memory database (no persistence)
 - `busy_timeout` - Busy timeout in milliseconds (default: 5000)
-- `journal_mode` - Journal mode (e.g., `wal`, `delete`)
+- `mode` - Access mode (`ro`, `rw`, `rwc`, `memory`)
+- `cache` - Cache mode (`shared`, `private`)
 
 Example with options:
 ```go
-db, err := sql.Open("wasmsqlite", "file=/data.db?vfs=opfs-sahpool&busy_timeout=10000&journal_mode=wal")
+db, err := sql.Open("wasmsqlite", "file=/data.db?vfs=opfs-sahpool&busy_timeout=10000&mode=rwc")
 ```
 
 ## Advanced Features
@@ -167,29 +233,91 @@ case wasmsqlite.VFSTypeMemory:
 | Firefox | 111+          | ✅ Full      |
 | Safari  | 15.2+         | ✅ Full      |
 
-## Limitations
-
-- SQLite extensions cannot be loaded dynamically
-- Performance is slower than native SQLite
-- OPFS storage is origin-scoped (per domain)
-- Requires secure context (HTTPS/localhost)
-
 ## Development
 
-To modify the Worker or contribute:
+### Building the TypeScript Worker
 
 ```bash
 # Install dependencies
-cd worker
-npm install
+make install-deps
 
-# Build Worker
-npm run build
+# Build the worker
+make build-worker
 
-# Run tests
-cd ../example
-make serve
+# Or build everything
+make build
 ```
+
+### Running Tests
+
+```bash
+make test
+```
+
+### Development Mode
+
+```bash
+# Build and serve with auto-reload
+make dev
+```
+
+### Available Make Commands
+
+```bash
+make help              # Show all available commands
+make setup            # Initial setup
+make build            # Build everything
+make build-worker     # Build TypeScript worker only
+make build-wasm       # Build Go WASM only
+make serve            # Run demo server
+make test             # Run tests
+make clean            # Clean build artifacts
+```
+
+## Architecture
+
+```
+┌─────────────────────────────────────────┐
+│         Go Application (WASM)           │
+│  ┌───────────────────────────────────┐  │
+│  │     SQLC Generated Code           │  │
+│  └───────────────────────────────────┘  │
+│  ┌───────────────────────────────────┐  │
+│  │     sqlc-wasm Driver              │  │
+│  └───────────────────────────────────┘  │
+└─────────────────────────────────────────┘
+                    ↕
+┌─────────────────────────────────────────┐
+│      JavaScript Bridge (bridge.js)      │
+└─────────────────────────────────────────┘
+                    ↕
+┌─────────────────────────────────────────┐
+│    SQLite Web Worker (Worker Thread)    │
+│  ┌───────────────────────────────────┐  │
+│  │  sqlite3-worker1-promiser.js      │  │
+│  └───────────────────────────────────┘  │
+│  ┌───────────────────────────────────┐  │
+│  │     SQLite WASM (sqlite3.wasm)    │  │
+│  └───────────────────────────────────┘  │
+└─────────────────────────────────────────┘
+                    ↕
+┌─────────────────────────────────────────┐
+│            OPFS Storage Layer           │
+│         (Persistent File System)        │
+└─────────────────────────────────────────┘
+```
+
+## Limitations
+
+- SQLite extensions cannot be loaded dynamically
+- Performance is slower than native SQLite (but optimized with Web Workers)
+- OPFS storage is origin-scoped (per domain)
+- Requires secure context (HTTPS/localhost)
+- Cross-origin restrictions apply
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
