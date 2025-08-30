@@ -322,7 +322,7 @@ func (b *BridgeAdapter) callAsync(method js.Value, args ...interface{}) (js.Valu
 				done <- struct {
 					result js.Value
 					err    error
-				}{js.Undefined(), fmt.Errorf(errorMsg)}
+				}{js.Undefined(), fmt.Errorf("%s", errorMsg)}
 				return nil
 			}
 		}
@@ -365,7 +365,7 @@ func (b *BridgeAdapter) callAsync(method js.Value, args ...interface{}) (js.Valu
 		done <- struct {
 			result js.Value
 			err    error
-		}{js.Undefined(), fmt.Errorf(errorMsg)}
+		}{js.Undefined(), fmt.Errorf("%s", errorMsg)}
 		return nil
 	})
 	defer catch.Release()
