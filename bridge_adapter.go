@@ -3,9 +3,11 @@
 package wasmsqlite
 
 import (
+	"database/sql"
 	"fmt"
 	"sync"
 	"syscall/js"
+	"time"
 )
 
 // BridgeAdapter adapts the JavaScript SQLite bridge to work with our Go driver
@@ -88,7 +90,7 @@ func (b *BridgeAdapter) Exec(sql string, params []interface{}) (int, int, error)
 	// Convert params to JavaScript array
 	jsParams := js.Global().Get("Array").New()
 	for i, param := range params {
-		jsParams.SetIndex(i, param)
+		jsParams.SetIndex(i, b.toJSValue(param))
 	}
 
 	result, err := b.callAsync(execMethod, sql, jsParams)
@@ -125,7 +127,7 @@ func (b *BridgeAdapter) Query(sql string, params []interface{}) ([]string, [][]i
 	// Convert params to JavaScript array
 	jsParams := js.Global().Get("Array").New()
 	for i, param := range params {
-		jsParams.SetIndex(i, param)
+		jsParams.SetIndex(i, b.toJSValue(param))
 	}
 
 	result, err := b.callAsync(queryMethod, sql, jsParams)
@@ -376,4 +378,74 @@ func (b *BridgeAdapter) callAsync(method js.Value, args ...interface{}) (js.Valu
 	// Wait for completion
 	result := <-done
 	return result.result, result.err
+}
+
+// toJSValue safely converts a Go value to a JavaScript value, handling nil and special cases
+func (b *BridgeAdapter) toJSValue(v interface{}) js.Value {
+	if v == nil {
+		return js.Null()
+	}
+	
+	// Handle common database types
+	switch val := v.(type) {
+	case nil:
+		return js.Null()
+	case bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64,
+		float32, float64, string:
+		// These types are handled directly by js.ValueOf
+		return js.ValueOf(val)
+	case []byte:
+		// Convert byte slice to Uint8Array
+		if val == nil || len(val) == 0 {
+			return js.Null()
+		}
+		uint8Array := js.Global().Get("Uint8Array").New(len(val))
+		js.CopyBytesToJS(uint8Array, val)
+		return uint8Array
+	case time.Time:
+		// Convert time to ISO string
+		if val.IsZero() {
+			return js.Null()
+		}
+		return js.ValueOf(val.Format(time.RFC3339))
+	case *time.Time:
+		// Handle pointer to time
+		if val == nil || val.IsZero() {
+			return js.Null()
+		}
+		return js.ValueOf(val.Format(time.RFC3339))
+	case sql.NullString:
+		if val.Valid {
+			return js.ValueOf(val.String)
+		}
+		return js.Null()
+	case sql.NullBool:
+		if val.Valid {
+			return js.ValueOf(val.Bool)
+		}
+		return js.Null()
+	case sql.NullInt64:
+		if val.Valid {
+			return js.ValueOf(val.Int64)
+		}
+		return js.Null()
+	case sql.NullFloat64:
+		if val.Valid {
+			return js.ValueOf(val.Float64)
+		}
+		return js.Null()
+	case sql.NullTime:
+		if val.Valid {
+			return js.ValueOf(val.Time.Format(time.RFC3339))
+		}
+		return js.Null()
+	default:
+		// For any other type, try to convert it to a string
+		// This prevents panics but may not be ideal for all types
+		if val == nil {
+			return js.Null()
+		}
+		// Use fmt.Sprint as a fallback
+		return js.ValueOf(fmt.Sprintf("%v", val))
+	}
 }

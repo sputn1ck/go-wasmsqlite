@@ -57,6 +57,7 @@ func main() {
 	js.Global().Set("dumpDatabase", js.FuncOf(dumpDatabaseJS))
 	js.Global().Set("loadDatabase", js.FuncOf(loadDatabaseJS))
 	js.Global().Set("getMigrationStatus", js.FuncOf(getMigrationStatusJS))
+	js.Global().Set("testNoRows", js.FuncOf(testNoRowsJS))
 
 	fmt.Println("✅ Demo functions are ready!")
 	fmt.Println("📖 Available functions:")
