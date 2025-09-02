@@ -8,6 +8,18 @@ import (
 	"database/sql"
 )
 
+type Attachment struct {
+	ID          int64          `json:"id"`
+	UserID      int64          `json:"user_id"`
+	Filename    string         `json:"filename"`
+	ContentType sql.NullString `json:"content_type"`
+	Data        []byte         `json:"data"`
+	Thumbnail   []byte         `json:"thumbnail"`
+	Size        sql.NullInt64  `json:"size"`
+	Checksum    []byte         `json:"checksum"`
+	CreatedAt   sql.NullTime   `json:"created_at"`
+}
+
 type Post struct {
 	ID        int64          `json:"id"`
 	UserID    int64          `json:"user_id"`
@@ -15,11 +27,15 @@ type Post struct {
 	Content   sql.NullString `json:"content"`
 	Published sql.NullBool   `json:"published"`
 	CreatedAt sql.NullTime   `json:"created_at"`
+	UpdatedAt sql.NullTime   `json:"updated_at"`
 }
 
 type User struct {
 	ID        int64        `json:"id"`
 	Username  string       `json:"username"`
 	Email     string       `json:"email"`
+	Avatar    []byte       `json:"avatar"`
+	Metadata  []byte       `json:"metadata"`
 	CreatedAt sql.NullTime `json:"created_at"`
+	UpdatedAt sql.NullTime `json:"updated_at"`
 }

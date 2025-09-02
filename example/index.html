@@ -155,6 +155,13 @@
     </div>
 
     <div class="container">
+        <h2>🧪 Testing</h2>
+        <p>Run tests to verify various database features:</p>
+        <button onclick="testNoRowsHandling()">Test No Rows Handling</button>
+        <button onclick="testBlobOperations()">Test BLOB Operations</button>
+    </div>
+
+    <div class="container">
         <h2>📊 Output</h2>
         <div id="output">Welcome to wasmsqlite demo!
 Loading WebAssembly module...</div>
@@ -369,6 +376,18 @@ Loading WebAssembly module...</div>
             if (!checkReady()) return;
             console.log("\n🔍 Checking migration status...");
             getMigrationStatus();
+        }
+        
+        function testNoRowsHandling() {
+            if (!checkReady()) return;
+            console.log("\n🧪 Testing no rows handling...");
+            testNoRows();
+        }
+        
+        function testBlobOperations() {
+            if (!checkReady()) return;
+            console.log("\n🧪 Testing BLOB operations...");
+            testBlob();
         }
 
         // Disable buttons initially

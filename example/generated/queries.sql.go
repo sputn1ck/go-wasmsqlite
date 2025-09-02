@@ -10,10 +10,51 @@ import (
 	"database/sql"
 )
 
+const createAttachment = `-- name: CreateAttachment :one
+INSERT INTO attachments (user_id, filename, content_type, data, thumbnail, size, checksum)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id, user_id, filename, content_type, data, thumbnail, size, checksum, created_at
+`
+
+type CreateAttachmentParams struct {
+	UserID      int64          `json:"user_id"`
+	Filename    string         `json:"filename"`
+	ContentType sql.NullString `json:"content_type"`
+	Data        []byte         `json:"data"`
+	Thumbnail   []byte         `json:"thumbnail"`
+	Size        sql.NullInt64  `json:"size"`
+	Checksum    []byte         `json:"checksum"`
+}
+
+func (q *Queries) CreateAttachment(ctx context.Context, arg CreateAttachmentParams) (Attachment, error) {
+	row := q.db.QueryRowContext(ctx, createAttachment,
+		arg.UserID,
+		arg.Filename,
+		arg.ContentType,
+		arg.Data,
+		arg.Thumbnail,
+		arg.Size,
+		arg.Checksum,
+	)
+	var i Attachment
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Filename,
+		&i.ContentType,
+		&i.Data,
+		&i.Thumbnail,
+		&i.Size,
+		&i.Checksum,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createPost = `-- name: CreatePost :one
 INSERT INTO posts (user_id, title, content, published)
 VALUES (?, ?, ?, ?)
-RETURNING id, user_id, title, content, published, created_at
+RETURNING id, user_id, title, content, published, created_at, updated_at
 `
 
 type CreatePostParams struct {
@@ -38,6 +79,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 		&i.Content,
 		&i.Published,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -45,7 +87,7 @@ func (q *Queries) CreatePost(ctx context.Context, arg CreatePostParams) (Post, e
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, email)
 VALUES (?, ?)
-RETURNING id, username, email, created_at
+RETURNING id, username, email, avatar, metadata, created_at, updated_at
 `
 
 type CreateUserParams struct {
@@ -60,9 +102,22 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.ID,
 		&i.Username,
 		&i.Email,
+		&i.Avatar,
+		&i.Metadata,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const deleteAttachment = `-- name: DeleteAttachment :exec
+DELETE FROM attachments
+WHERE id = ?
+`
+
+func (q *Queries) DeleteAttachment(ctx context.Context, id int64) error {
+	_, err := q.db.ExecContext(ctx, deleteAttachment, id)
+	return err
 }
 
 const deletePost = `-- name: DeletePost :exec
@@ -75,8 +130,42 @@ func (q *Queries) DeletePost(ctx context.Context, id int64) error {
 	return err
 }
 
+const getAttachment = `-- name: GetAttachment :one
+SELECT id, user_id, filename, content_type, data, thumbnail, size, checksum, created_at FROM attachments
+WHERE id = ?
+`
+
+func (q *Queries) GetAttachment(ctx context.Context, id int64) (Attachment, error) {
+	row := q.db.QueryRowContext(ctx, getAttachment, id)
+	var i Attachment
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Filename,
+		&i.ContentType,
+		&i.Data,
+		&i.Thumbnail,
+		&i.Size,
+		&i.Checksum,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAttachmentData = `-- name: GetAttachmentData :one
+SELECT data FROM attachments
+WHERE id = ?
+`
+
+func (q *Queries) GetAttachmentData(ctx context.Context, id int64) ([]byte, error) {
+	row := q.db.QueryRowContext(ctx, getAttachmentData, id)
+	var data []byte
+	err := row.Scan(&data)
+	return data, err
+}
+
 const getPost = `-- name: GetPost :one
-SELECT p.id, p.user_id, p.title, p.content, p.published, p.created_at, u.username
+SELECT p.id, p.user_id, p.title, p.content, p.published, p.created_at, p.updated_at, u.username
 FROM posts p
 JOIN users u ON p.user_id = u.id
 WHERE p.id = ?
@@ -89,6 +178,7 @@ type GetPostRow struct {
 	Content   sql.NullString `json:"content"`
 	Published sql.NullBool   `json:"published"`
 	CreatedAt sql.NullTime   `json:"created_at"`
+	UpdatedAt sql.NullTime   `json:"updated_at"`
 	Username  string         `json:"username"`
 }
 
@@ -102,13 +192,14 @@ func (q *Queries) GetPost(ctx context.Context, id int64) (GetPostRow, error) {
 		&i.Content,
 		&i.Published,
 		&i.CreatedAt,
+		&i.UpdatedAt,
 		&i.Username,
 	)
 	return i, err
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, username, email, created_at FROM users
+SELECT id, username, email, avatar, metadata, created_at, updated_at FROM users
 WHERE id = ?
 `
 
@@ -119,13 +210,84 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.ID,
 		&i.Username,
 		&i.Email,
+		&i.Avatar,
+		&i.Metadata,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getUserWithAvatar = `-- name: GetUserWithAvatar :one
+SELECT id, username, email, avatar, metadata, created_at
+FROM users
+WHERE id = ?
+`
+
+type GetUserWithAvatarRow struct {
+	ID        int64        `json:"id"`
+	Username  string       `json:"username"`
+	Email     string       `json:"email"`
+	Avatar    []byte       `json:"avatar"`
+	Metadata  []byte       `json:"metadata"`
+	CreatedAt sql.NullTime `json:"created_at"`
+}
+
+func (q *Queries) GetUserWithAvatar(ctx context.Context, id int64) (GetUserWithAvatarRow, error) {
+	row := q.db.QueryRowContext(ctx, getUserWithAvatar, id)
+	var i GetUserWithAvatarRow
+	err := row.Scan(
+		&i.ID,
+		&i.Username,
+		&i.Email,
+		&i.Avatar,
+		&i.Metadata,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
+const listAttachmentsByUser = `-- name: ListAttachmentsByUser :many
+SELECT id, user_id, filename, content_type, data, thumbnail, size, checksum, created_at FROM attachments
+WHERE user_id = ?
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAttachmentsByUser(ctx context.Context, userID int64) ([]Attachment, error) {
+	rows, err := q.db.QueryContext(ctx, listAttachmentsByUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Attachment{}
+	for rows.Next() {
+		var i Attachment
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Filename,
+			&i.ContentType,
+			&i.Data,
+			&i.Thumbnail,
+			&i.Size,
+			&i.Checksum,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPosts = `-- name: ListPosts :many
-SELECT id, user_id, title, content, published, created_at FROM posts
+SELECT id, user_id, title, content, published, created_at, updated_at FROM posts
 ORDER BY created_at DESC
 `
 
@@ -145,6 +307,7 @@ func (q *Queries) ListPosts(ctx context.Context) ([]Post, error) {
 			&i.Content,
 			&i.Published,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -160,7 +323,7 @@ func (q *Queries) ListPosts(ctx context.Context) ([]Post, error) {
 }
 
 const listPostsByUser = `-- name: ListPostsByUser :many
-SELECT id, user_id, title, content, published, created_at FROM posts
+SELECT id, user_id, title, content, published, created_at, updated_at FROM posts
 WHERE user_id = ?
 ORDER BY created_at DESC
 `
@@ -181,6 +344,7 @@ func (q *Queries) ListPostsByUser(ctx context.Context, userID int64) ([]Post, er
 			&i.Content,
 			&i.Published,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -196,7 +360,7 @@ func (q *Queries) ListPostsByUser(ctx context.Context, userID int64) ([]Post, er
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, username, email, created_at FROM users
+SELECT id, username, email, avatar, metadata, created_at, updated_at FROM users
 ORDER BY created_at DESC
 `
 
@@ -213,7 +377,10 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.ID,
 			&i.Username,
 			&i.Email,
+			&i.Avatar,
+			&i.Metadata,
 			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -226,6 +393,22 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateAttachmentThumbnail = `-- name: UpdateAttachmentThumbnail :exec
+UPDATE attachments
+SET thumbnail = ?
+WHERE id = ?
+`
+
+type UpdateAttachmentThumbnailParams struct {
+	Thumbnail []byte `json:"thumbnail"`
+	ID        int64  `json:"id"`
+}
+
+func (q *Queries) UpdateAttachmentThumbnail(ctx context.Context, arg UpdateAttachmentThumbnailParams) error {
+	_, err := q.db.ExecContext(ctx, updateAttachmentThumbnail, arg.Thumbnail, arg.ID)
+	return err
 }
 
 const updatePost = `-- name: UpdatePost :exec
@@ -248,5 +431,24 @@ func (q *Queries) UpdatePost(ctx context.Context, arg UpdatePostParams) error {
 		arg.Published,
 		arg.ID,
 	)
+	return err
+}
+
+const updateUserAvatar = `-- name: UpdateUserAvatar :exec
+
+UPDATE users
+SET avatar = ?, metadata = ?
+WHERE id = ?
+`
+
+type UpdateUserAvatarParams struct {
+	Avatar   []byte `json:"avatar"`
+	Metadata []byte `json:"metadata"`
+	ID       int64  `json:"id"`
+}
+
+// BLOB/Binary data operations
+func (q *Queries) UpdateUserAvatar(ctx context.Context, arg UpdateUserAvatarParams) error {
+	_, err := q.db.ExecContext(ctx, updateUserAvatar, arg.Avatar, arg.Metadata, arg.ID)
 	return err
 }

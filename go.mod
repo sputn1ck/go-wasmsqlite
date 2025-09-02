@@ -1,4 +1,4 @@
-module github.com/sputn1ck/go-sqlite3-wasm
+module github.com/sputn1ck/go-wasmsqlite
 
 go 1.24.4
 

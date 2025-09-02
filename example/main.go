@@ -12,8 +12,8 @@ import (
 
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	wasmsqlite "github.com/sputn1ck/go-sqlite3-wasm"
-	database "github.com/sputn1ck/go-sqlite3-wasm/example/generated"
+	wasmsqlite "github.com/sputn1ck/go-wasmsqlite"
+	database "github.com/sputn1ck/go-wasmsqlite/example/generated"
 )
 
 //go:embed migrations/*.sql
@@ -58,6 +58,7 @@ func main() {
 	js.Global().Set("loadDatabase", js.FuncOf(loadDatabaseJS))
 	js.Global().Set("getMigrationStatus", js.FuncOf(getMigrationStatusJS))
 	js.Global().Set("testNoRows", js.FuncOf(testNoRowsJS))
+	js.Global().Set("testBlob", js.FuncOf(testBlobJS))
 
 	fmt.Println("✅ Demo functions are ready!")
 	fmt.Println("📖 Available functions:")
@@ -73,6 +74,8 @@ func main() {
 	fmt.Println("  - dumpDatabase(): Export database as SQL dump (saved to window.lastDatabaseDump)")
 	fmt.Println("  - loadDatabase(dump): Import SQL dump to restore database")
 	fmt.Println("  - getMigrationStatus(): Get current migration version and status")
+	fmt.Println("  - testNoRows(): Test handling of SQL queries with no results")
+	fmt.Println("  - testBlob(): Test BLOB/binary data operations")
 
 	// Keep the program running
 	select {}

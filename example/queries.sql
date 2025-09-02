@@ -39,3 +39,42 @@ WHERE id = ?;
 -- name: DeletePost :exec
 DELETE FROM posts
 WHERE id = ?;
+
+-- BLOB/Binary data operations
+
+-- name: UpdateUserAvatar :exec
+UPDATE users
+SET avatar = ?, metadata = ?
+WHERE id = ?;
+
+-- name: GetUserWithAvatar :one
+SELECT id, username, email, avatar, metadata, created_at
+FROM users
+WHERE id = ?;
+
+-- name: CreateAttachment :one
+INSERT INTO attachments (user_id, filename, content_type, data, thumbnail, size, checksum)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING *;
+
+-- name: GetAttachment :one
+SELECT * FROM attachments
+WHERE id = ?;
+
+-- name: ListAttachmentsByUser :many
+SELECT * FROM attachments
+WHERE user_id = ?
+ORDER BY created_at DESC;
+
+-- name: DeleteAttachment :exec
+DELETE FROM attachments
+WHERE id = ?;
+
+-- name: GetAttachmentData :one
+SELECT data FROM attachments
+WHERE id = ?;
+
+-- name: UpdateAttachmentThumbnail :exec
+UPDATE attachments
+SET thumbnail = ?
+WHERE id = ?;
