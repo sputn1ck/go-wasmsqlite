@@ -186,6 +186,17 @@ func TestBrowserProtocolMetadataE2E(t *testing.T) {
 	}
 }
 
+func TestBrowserBridgeNotLoadedErrorE2E(t *testing.T) {
+	global := js.Global()
+	original := global.Get("sqliteBridge")
+	global.Set("sqliteBridge", js.Undefined())
+	defer global.Set("sqliteBridge", original)
+
+	if _, err := NewBridgeAdapter(); !errors.Is(err, ErrBridgeNotLoaded) {
+		t.Fatalf("expected ErrBridgeNotLoaded, got %v", err)
+	}
+}
+
 func TestBrowserRequirePersistentRejectsMemoryE2E(t *testing.T) {
 	db, err := Open(&Options{File: ":memory:", VFS: "memory", RequirePersistent: true})
 	if err != nil {
