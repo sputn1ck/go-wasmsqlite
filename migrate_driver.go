@@ -30,16 +30,16 @@ func NewMigrateDriver(db *sql.DB) (database.Driver, error) {
 	if db == nil {
 		return nil, fmt.Errorf("db cannot be nil")
 	}
-	
+
 	driver := &MigrateDriver{
 		db: db,
 	}
-	
+
 	// Ensure migration table exists
 	if err := driver.ensureVersionTable(); err != nil {
 		return nil, err
 	}
-	
+
 	return driver, nil
 }
 
@@ -82,15 +82,15 @@ func (d *MigrateDriver) Run(migration io.Reader) error {
 	if err != nil {
 		return err
 	}
-	
+
 	query := string(migrationBytes)
-	
+
 	// Execute migration in a transaction
 	tx, err := d.db.Begin()
 	if err != nil {
 		return fmt.Errorf("transaction start failed: %w", err)
 	}
-	
+
 	// SQLite can handle multiple statements in a single Exec call
 	// when they're separated by semicolons, similar to the original driver
 	if _, err := tx.Exec(query); err != nil {
@@ -99,11 +99,11 @@ func (d *MigrateDriver) Run(migration io.Reader) error {
 		}
 		return fmt.Errorf("migration failed: %w", err)
 	}
-	
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("transaction commit failed: %w", err)
 	}
-	
+
 	return nil
 }
 
@@ -113,13 +113,13 @@ func (d *MigrateDriver) SetVersion(version int, dirty bool) error {
 	if err != nil {
 		return fmt.Errorf("transaction start failed: %w", err)
 	}
-	
+
 	query := `DELETE FROM schema_migrations`
 	if _, err := tx.Exec(query); err != nil {
 		tx.Rollback()
 		return err
 	}
-	
+
 	// Also re-write the schema version for nil dirty versions to prevent
 	// empty schema version for failed down migration on the first migration
 	// See: https://github.com/golang-migrate/migrate/issues/330
@@ -132,24 +132,24 @@ func (d *MigrateDriver) SetVersion(version int, dirty bool) error {
 			return err
 		}
 	}
-	
+
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("transaction commit failed: %w", err)
 	}
-	
+
 	return nil
 }
 
 // Version returns the current migration version
 func (d *MigrateDriver) Version() (version int, dirty bool, err error) {
 	query := `SELECT version, dirty FROM schema_migrations LIMIT 1`
-	
+
 	row := d.db.QueryRow(query)
 	err = row.Scan(&version, &dirty)
 	if err == sql.ErrNoRows {
 		return database.NilVersion, false, nil
 	}
-	
+
 	return version, dirty, err
 }
 
@@ -162,7 +162,7 @@ func (d *MigrateDriver) Drop() error {
 		return err
 	}
 	defer rows.Close()
-	
+
 	var tables []string
 	for rows.Next() {
 		var table string
@@ -171,11 +171,11 @@ func (d *MigrateDriver) Drop() error {
 		}
 		tables = append(tables, table)
 	}
-	
+
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	
+
 	// Drop all tables
 	if len(tables) > 0 {
 		for _, table := range tables {
@@ -189,6 +189,6 @@ func (d *MigrateDriver) Drop() error {
 			return err
 		}
 	}
-	
+
 	return nil
 }
