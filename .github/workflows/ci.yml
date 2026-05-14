@@ -5,6 +5,12 @@ on:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      browser_tests:
+        description: Run browser E2E tests
+        required: false
+        default: "false"
 
 jobs:
   compile:
@@ -16,7 +22,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version-file: go.mod
           
       - name: Get dependencies
         run: go mod download
@@ -37,3 +43,21 @@ jobs:
           
       - name: Run go vet
         run: GOOS=js GOARCH=wasm go vet ./...
+
+  browser-test:
+    runs-on: ubuntu-latest
+    if: ${{ vars.WASM_BROWSER_TEST == '1' || github.event.inputs.browser_tests == 'true' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Setup Chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run browser E2E tests
+        run: make browser-test
