@@ -1,15 +1,54 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# Configuration
-SQLITE_VERSION="3500400"
-SQLITE_URL="https://www.sqlite.org/2025/sqlite-wasm-${SQLITE_VERSION}.zip"
-EXPECTED_SHA="cdff32cba45537d96efd883a9a3dd09af7616b2fa9b414afbbc7a36fbe474af5"
-ASSETS_DIR="assets"
+# Configuration. By default, fetch the latest official SQLite WASM bundle from
+# the script-friendly metadata embedded in sqlite.org/download.html.
+ASSETS_DIR="${ASSETS_DIR:-assets}"
+SQLITE_DOWNLOAD_PAGE="${SQLITE_DOWNLOAD_PAGE:-https://sqlite.org/download.html}"
+SQLITE_BASE_URL="${SQLITE_BASE_URL:-https://sqlite.org}"
+REQUESTED_VERSION="${SQLITE_VERSION:-}"
+REQUESTED_URL="${SQLITE_URL:-}"
+EXPECTED_SHA="${EXPECTED_SHA:-}"
 TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/sqlite-wasm-download.XXXXXX")
 trap 'rm -rf "$TEMP_DIR"' EXIT
 
-echo "📦 Fetching SQLite WASM ${SQLITE_VERSION}..."
+if [ -n "$REQUESTED_URL" ]; then
+    SQLITE_URL="$REQUESTED_URL"
+    SQLITE_ZIP="${SQLITE_URL##*/}"
+    SQLITE_VERSION="${REQUESTED_VERSION:-${SQLITE_ZIP#sqlite-wasm-}}"
+    SQLITE_VERSION="${SQLITE_VERSION%.zip}"
+    SQLITE_RELEASE="${SQLITE_RELEASE:-$SQLITE_VERSION}"
+else
+    echo "📦 Fetching SQLite WASM metadata..."
+    DOWNLOAD_HTML=$(curl -fsSL "$SQLITE_DOWNLOAD_PAGE")
+    WASM_RECORD=$(printf '%s\n' "$DOWNLOAD_HTML" | awk -F, -v requested="$REQUESTED_VERSION" '
+        $1 == "PRODUCT" && $3 ~ /^20[0-9][0-9]\/sqlite-wasm-[0-9]+\.zip$/ {
+            if (requested == "" || $3 ~ "/sqlite-wasm-" requested "\\.zip$") {
+                print
+                exit
+            }
+        }
+    ')
+
+    if [ -z "$WASM_RECORD" ]; then
+        if [ -n "$REQUESTED_VERSION" ]; then
+            echo "❌ Could not find sqlite-wasm-${REQUESTED_VERSION}.zip in $SQLITE_DOWNLOAD_PAGE"
+        else
+            echo "❌ Could not find a sqlite-wasm download in $SQLITE_DOWNLOAD_PAGE"
+        fi
+        exit 1
+    fi
+
+    IFS=, read -r _ SQLITE_RELEASE RELATIVE_URL _ EXPECTED_SHA <<EOF
+$WASM_RECORD
+EOF
+    SQLITE_ZIP="${RELATIVE_URL##*/}"
+    SQLITE_VERSION="${SQLITE_ZIP#sqlite-wasm-}"
+    SQLITE_VERSION="${SQLITE_VERSION%.zip}"
+    SQLITE_URL="${SQLITE_BASE_URL%/}/$RELATIVE_URL"
+fi
+
+echo "📦 Fetching SQLite WASM ${SQLITE_RELEASE} (${SQLITE_VERSION})..."
 
 # Create assets directory if it doesn't exist
 mkdir -p "$ASSETS_DIR"
@@ -30,7 +69,7 @@ else
     ACTUAL_SHA=""
 fi
 
-if [ -n "$ACTUAL_SHA" ]; then
+if [ -n "$ACTUAL_SHA" ] && [ -n "$EXPECTED_SHA" ]; then
     if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
         echo "❌ Checksum mismatch!"
         echo "   Expected: $EXPECTED_SHA"
@@ -38,6 +77,8 @@ if [ -n "$ACTUAL_SHA" ]; then
         exit 1
     fi
     echo "✅ Checksum verified"
+elif [ -z "$EXPECTED_SHA" ]; then
+    echo "⚠️  Warning: EXPECTED_SHA not set. Skipping checksum verification."
 fi
 
 # Extract the zip file

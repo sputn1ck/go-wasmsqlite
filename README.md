@@ -246,6 +246,8 @@ make browser-test   # Run headless Chrome browser E2E tests
 make clean          # Remove build artifacts
 ```
 
+`make fetch-assets` reads the official SQLite download metadata and fetches the current `sqlite-wasm-*.zip` bundle with SHA3 verification. To pin a specific archive, pass `SQLITE_URL` and `EXPECTED_SHA`; `SQLITE_VERSION=3530100 make fetch-assets` selects that version when it is still listed on the download page.
+
 Browser tests build a WASM test binary, serve the SQLite assets with the required headers, launch headless Chrome, and verify OPFS persistence, BLOBs, dump/load, transactions, memory mode, migrations, and the static Pages-style example path.
 
 ## GitHub Pages
