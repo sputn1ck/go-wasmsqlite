@@ -6,16 +6,14 @@ SQLITE_VERSION="3500400"
 SQLITE_URL="https://www.sqlite.org/2025/sqlite-wasm-${SQLITE_VERSION}.zip"
 EXPECTED_SHA="cdff32cba45537d96efd883a9a3dd09af7616b2fa9b414afbbc7a36fbe474af5"
 ASSETS_DIR="assets"
-TEMP_DIR="temp_sqlite_download"
+TEMP_DIR=$(mktemp -d "${TMPDIR:-/tmp}/sqlite-wasm-download.XXXXXX")
+trap 'rm -rf "$TEMP_DIR"' EXIT
 
 echo "📦 Fetching SQLite WASM ${SQLITE_VERSION}..."
 
 # Create assets directory if it doesn't exist
 mkdir -p "$ASSETS_DIR"
-
-# Create temp directory
-rm -rf "$TEMP_DIR"
-mkdir -p "$TEMP_DIR"
+rm -f "$ASSETS_DIR/sqlite3-worker1.js" "$ASSETS_DIR/sqlite3-worker1-promiser.js"
 
 # Download the zip file
 echo "⬇️  Downloading from $SQLITE_URL..."
@@ -37,7 +35,6 @@ if [ -n "$ACTUAL_SHA" ]; then
         echo "❌ Checksum mismatch!"
         echo "   Expected: $EXPECTED_SHA"
         echo "   Got:      $ACTUAL_SHA"
-        rm -rf "$TEMP_DIR"
         exit 1
     fi
     echo "✅ Checksum verified"
@@ -51,13 +48,10 @@ unzip -q "$TEMP_DIR/sqlite-wasm.zip" -d "$TEMP_DIR"
 echo "📋 Copying required files to $ASSETS_DIR..."
 cp "$TEMP_DIR/sqlite-wasm-${SQLITE_VERSION}/jswasm/sqlite3.js" "$ASSETS_DIR/"
 cp "$TEMP_DIR/sqlite-wasm-${SQLITE_VERSION}/jswasm/sqlite3.wasm" "$ASSETS_DIR/"
-cp "$TEMP_DIR/sqlite-wasm-${SQLITE_VERSION}/jswasm/sqlite3-worker1.js" "$ASSETS_DIR/"
-cp "$TEMP_DIR/sqlite-wasm-${SQLITE_VERSION}/jswasm/sqlite3-worker1-promiser.js" "$ASSETS_DIR/"
 cp "$TEMP_DIR/sqlite-wasm-${SQLITE_VERSION}/jswasm/sqlite3-opfs-async-proxy.js" "$ASSETS_DIR/"
 
 # Clean up
 echo "🧹 Cleaning up..."
-rm -rf "$TEMP_DIR"
 
 echo "✨ SQLite WASM assets successfully fetched and installed!"
 echo "   Files in $ASSETS_DIR:"

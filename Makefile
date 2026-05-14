@@ -1,4 +1,4 @@
-.PHONY: all build clean test serve help build-wasm build-example setup fetch-assets
+.PHONY: all build clean test browser-test serve help build-wasm build-example setup fetch-assets
 
 # Default target
 all: build
@@ -21,6 +21,7 @@ build-example: fetch-assets build-wasm
 	cd example && cp $$(go env GOROOT)/lib/wasm/wasm_exec.js .
 	@echo "📦 Copying bridge and assets to example..."
 	cp bridge/sqlite-bridge.js example/
+	cp bridge/sqlite-worker.js example/
 	cp assets/*.js example/
 	cp assets/*.wasm example/
 	@echo "✅ Example built"
@@ -45,6 +46,11 @@ test:
 	@echo "🧪 Running tests..."
 	go test -v ./...
 	@echo "✅ Tests passed"
+	@echo "ℹ️  Browser tests are opt-in: run make browser-test"
+
+browser-test: build-example
+	@echo "🌐 Running browser E2E tests..."
+	WASM_BROWSER_TEST=1 go test -run TestBrowserE2E ./...
 
 # Clean build artifacts
 clean:
@@ -52,6 +58,9 @@ clean:
 	rm -f main.wasm
 	rm -f example/main.wasm example/wasm_exec.js
 	rm -f example/sqlite3.wasm
+	rm -f example/sqlite3.js example/sqlite3-opfs-async-proxy.js
+	rm -f example/sqlite3-worker1.js example/sqlite3-worker1-promiser.js
+	rm -f example/sqlite-bridge.js example/sqlite-worker.js
 	rm -rf assets
 	@echo "✅ Clean complete"
 
@@ -72,7 +81,7 @@ check:
 
 # Help
 help:
-	@echo "go-sqlite3-wasm Makefile Commands:"
+	@echo "go-wasmsqlite Makefile Commands:"
 	@echo ""
 	@echo "  make setup        - Initial setup (fetch SQLite WASM assets)"
 	@echo "  make fetch-assets - Download SQLite WASM from official source"

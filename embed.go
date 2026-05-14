@@ -11,11 +11,13 @@ import (
 
 // Embed all assets and bridge files
 //
-//go:embed assets/* bridge/sqlite-bridge.js
+//go:embed assets/* bridge/sqlite-bridge.js bridge/sqlite-worker.js
 var embeddedAssets embed.FS
 
-// ExtractAssets extracts all embedded SQLite WASM assets to the specified directory.
-// This includes sqlite3.wasm, sqlite3.js, worker files, and the bridge.
+// ExtractAssets extracts all embedded SQLite WASM assets to the specified
+// directory. The runtime files are assets/sqlite3.js, assets/sqlite3.wasm,
+// assets/sqlite3-opfs-async-proxy.js, bridge/sqlite-bridge.js, and
+// bridge/sqlite-worker.js.
 //
 // Example:
 //
@@ -106,9 +108,18 @@ func GetSQLiteJS() (string, error) {
 	return string(data), nil
 }
 
-// GetBridgeJS returns the handcrafted JavaScript bridge.
+// GetBridgeJS returns the main-thread JavaScript RPC bridge.
 func GetBridgeJS() (string, error) {
 	data, err := GetAsset("bridge/sqlite-bridge.js")
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+// GetWorkerJS returns the dedicated SQLite worker JavaScript.
+func GetWorkerJS() (string, error) {
+	data, err := GetAsset("bridge/sqlite-worker.js")
 	if err != nil {
 		return "", err
 	}

@@ -24,7 +24,8 @@ type Options struct {
 	// Busy timeout in milliseconds (default: 5000)
 	BusyTimeout int
 
-	// Custom Worker URL (optional, overrides embedded Worker)
+	// Custom sqlite-worker.js URL. Empty uses "sqlite-worker.js" next to
+	// sqlite-bridge.js.
 	WorkerURL string
 
 	// Whether to parse time strings as time.Time (default: false)
@@ -32,6 +33,12 @@ type Options struct {
 
 	// Journal mode (default: not set, uses SQLite default)
 	JournalMode string
+
+	// SQLite open mode query value: ro, rw, rwc, or memory.
+	Mode string
+
+	// SQLite URI cache query value.
+	Cache string
 
 	// Custom pragma statements to execute on open
 	Pragma []string
@@ -44,7 +51,7 @@ func DefaultOptions() *Options {
 		VFS:         "opfs",
 		BusyTimeout: 5000,
 		ParseTime:   false,
-		WorkerURL:   "", // Empty means use embedded Worker
+		WorkerURL:   "",
 	}
 }
 
@@ -57,7 +64,12 @@ func Open(opts *Options) (*sql.DB, error) {
 	// Build DSN from options
 	dsn := buildDSN(opts)
 
-	return sql.Open("wasmsqlite", dsn)
+	db, err := sql.Open("wasmsqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	return db, nil
 }
 
 // buildDSN builds a DSN string from options
@@ -88,6 +100,14 @@ func buildDSN(opts *Options) string {
 		values.Set("journal_mode", opts.JournalMode)
 	}
 
+	if opts.Mode != "" {
+		values.Set("mode", opts.Mode)
+	}
+
+	if opts.Cache != "" {
+		values.Set("cache", opts.Cache)
+	}
+
 	if len(opts.Pragma) > 0 {
 		values.Set("pragma", strings.Join(opts.Pragma, ";"))
 	}
@@ -107,24 +127,28 @@ func parseDSN(dsn string) (*Options, error) {
 		return opts, nil
 	}
 
-	fmt.Printf("🔍 Parsing DSN: %s\n", dsn)
-
 	values, err := url.ParseQuery(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("invalid DSN: %w", err)
 	}
 
 	if file := values.Get("file"); file != "" {
-		// Remove any query parameters from the file path
 		if questionMark := strings.Index(file, "?"); questionMark != -1 {
+			nestedValues, err := url.ParseQuery(file[questionMark+1:])
+			if err != nil {
+				return nil, fmt.Errorf("invalid file query parameters: %w", err)
+			}
+			for key, nested := range nestedValues {
+				if _, exists := values[key]; !exists {
+					values[key] = nested
+				}
+			}
 			file = file[:questionMark]
 		}
-		fmt.Printf("🔍 Extracted file: %s\n", file)
 		opts.File = file
 	}
 
 	if vfs := values.Get("vfs"); vfs != "" {
-		fmt.Printf("🔍 Extracted VFS: %s\n", vfs)
 		opts.VFS = vfs
 	}
 
@@ -148,6 +172,14 @@ func parseDSN(dsn string) (*Options, error) {
 		opts.JournalMode = journalMode
 	}
 
+	if mode := values.Get("mode"); mode != "" {
+		opts.Mode = mode
+	}
+
+	if cache := values.Get("cache"); cache != "" {
+		opts.Cache = cache
+	}
+
 	if pragma := values.Get("pragma"); pragma != "" {
 		opts.Pragma = strings.Split(pragma, ";")
 	}
@@ -155,7 +187,7 @@ func parseDSN(dsn string) (*Options, error) {
 	return opts, nil
 }
 
-// createWorker creates a new bridge to SQLite WASM
+// createWorker initializes the JavaScript bridge that owns the SQLite worker.
 func createWorker(opts *Options) (js.Value, error) {
 	// Check if the SQLite bridge is available
 	bridge := js.Global().Get("sqliteBridge")
@@ -164,30 +196,31 @@ func createWorker(opts *Options) (js.Value, error) {
 	}
 
 	// Initialize SQLite WASM through the bridge
-	if err := initializeSQLiteBridge(bridge); err != nil {
+	if err := initializeSQLiteBridge(bridge, opts.WorkerURL); err != nil {
 		return js.Null(), fmt.Errorf("failed to initialize SQLite bridge: %w", err)
 	}
 
-	// Return the bridge itself as the "worker" and a nil queue
-	// We'll bypass the queue system entirely
 	return bridge, nil
 }
 
 // initializeSQLiteBridge initializes the SQLite bridge
-func initializeSQLiteBridge(bridge js.Value) error {
-	// The bridge should already be initialized when it was loaded
-	// We can just check if the init method exists
+func initializeSQLiteBridge(bridge js.Value, workerURL string) error {
 	initMethod := bridge.Get("init")
 	if initMethod.IsUndefined() {
 		return fmt.Errorf("sqliteBridge.init method not found")
 	}
 
-	// Call init and wait for it to complete
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Create a promise that we can await
-	promise := initMethod.Invoke()
+	args := []interface{}{}
+	if workerURL != "" {
+		options := js.Global().Get("Object").New()
+		options.Set("workerURL", workerURL)
+		args = append(args, options)
+	}
+
+	promise := initMethod.Invoke(args...)
 	if promise.IsUndefined() {
 		return fmt.Errorf("bridge.init() did not return a promise")
 	}

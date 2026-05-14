@@ -86,7 +86,7 @@
     </style>
 </head>
 <body>
-    <h1>🚀 go-sqlite3-wasm Demo</h1>
+    <h1>🚀 go-wasmsqlite Demo</h1>
     <p>
         This demo showcases a SQLite database running entirely in your browser using WebAssembly,
         with data persisted in OPFS (Origin Private File System) when available.
@@ -167,8 +167,7 @@
 Loading WebAssembly module...</div>
     </div>
 
-    <!-- SQLite WASM Worker1 Promiser -->
-    <script src="sqlite3-worker1-promiser.js"></script>
+    <!-- SQLite bridge. The bridge starts sqlite-worker.js, which loads sqlite3.js. -->
     <script src="sqlite-bridge.js"></script>
     
     <script src="wasm_exec.js"></script>
@@ -202,7 +201,7 @@ Loading WebAssembly module...</div>
                     btn.disabled = false;
                 });
                 
-                console.log("🎉 go-sqlite3-wasm with golang-migrate is ready to use!");
+                console.log("🎉 go-wasmsqlite with golang-migrate is ready to use!");
             } catch (error) {
                 console.error("❌ Failed to load WebAssembly:", error);
                 status.textContent = "❌ Failed to load WebAssembly: " + error.message;

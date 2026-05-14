@@ -1,3 +1,5 @@
+//go:build !js
+
 package wasmsqlite
 
 import (
@@ -17,10 +19,9 @@ func TestEmbeddedAssets(t *testing.T) {
 	expectedFiles := []string{
 		"assets/sqlite3.wasm",
 		"assets/sqlite3.js",
-		"assets/sqlite3-worker1.js",
-		"assets/sqlite3-worker1-promiser.js",
 		"assets/sqlite3-opfs-async-proxy.js",
 		"bridge/sqlite-bridge.js",
+		"bridge/sqlite-worker.js",
 	}
 
 	for _, expected := range expectedFiles {
@@ -60,11 +61,19 @@ func TestEmbeddedAssets(t *testing.T) {
 	if len(bridge) == 0 {
 		t.Error("Bridge JS is empty")
 	}
+
+	worker, err := GetWorkerJS()
+	if err != nil {
+		t.Errorf("Failed to get worker JS: %v", err)
+	}
+	if len(worker) == 0 {
+		t.Error("Worker JS is empty")
+	}
 }
 
 func TestExtractAssets(t *testing.T) {
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "go-sqlite3-wasm-test-*")
+	tmpDir, err := os.MkdirTemp("", "go-wasmsqlite-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -81,6 +90,7 @@ func TestExtractAssets(t *testing.T) {
 		"assets/sqlite3.wasm",
 		"assets/sqlite3.js",
 		"bridge/sqlite-bridge.js",
+		"bridge/sqlite-worker.js",
 	}
 
 	for _, file := range expectedFiles {

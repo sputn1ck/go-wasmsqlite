@@ -3,4 +3,5 @@ main.wasm
 sqlite3.wasm
 wasm_exec.js
 sqlite-bridge.js
+sqlite-worker.js
 sqlite3*

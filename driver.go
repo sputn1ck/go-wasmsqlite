@@ -51,7 +51,7 @@ func (c *Connector) Connect(ctx context.Context) (driver.Conn, error) {
 	}
 
 	// Open database through bridge
-	vfsType, err := adapter.Open(opts.File, opts.VFS)
+	vfsType, err := adapter.Open(opts)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
@@ -168,12 +168,6 @@ func (c *Conn) QueryContext(ctx context.Context, query string, args []driver.Nam
 	columns, rows, err := c.adapter.Query(query, paramIfaces)
 	if err != nil {
 		return nil, err
-	}
-
-	fmt.Printf("Query returned %d columns: %v\n", len(columns), columns)
-	fmt.Printf("Query returned %d rows\n", len(rows))
-	if len(rows) > 0 {
-		fmt.Printf("First row: %v\n", rows[0])
 	}
 
 	return &Rows{

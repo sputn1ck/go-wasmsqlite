@@ -25,7 +25,7 @@ var (
 )
 
 func main() {
-	fmt.Println("🚀 Starting go-sqlite3-wasm demo with golang-migrate...")
+	fmt.Println("🚀 Starting go-wasmsqlite demo with golang-migrate...")
 
 	// Initialize database connection once
 	var err error
@@ -83,10 +83,11 @@ func main() {
 
 func openDB() (*sql.DB, error) {
 	// Try to open database - the Worker will handle VFS fallback
-	db, err := sql.Open("wasmsqlite", "file=/demo.db?vfs=opfs-sahpool&busy_timeout=5000")
+	db, err := sql.Open("wasmsqlite", "file=/demo.db?vfs=opfs&busy_timeout=5000")
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
+	db.SetMaxOpenConns(1)
 
 	return db, nil
 }

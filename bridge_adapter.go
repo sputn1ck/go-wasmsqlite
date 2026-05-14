@@ -13,6 +13,7 @@ import (
 // BridgeAdapter adapts the JavaScript SQLite bridge to work with our Go driver
 type BridgeAdapter struct {
 	bridge js.Value
+	dbID   string
 	mu     sync.Mutex
 }
 
@@ -28,50 +29,44 @@ func NewBridgeAdapter() (*BridgeAdapter, error) {
 	}, nil
 }
 
-// Init initializes the SQLite bridge
-func (b *BridgeAdapter) Init() error {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	initMethod := b.bridge.Get("init")
-	if initMethod.IsUndefined() {
-		return fmt.Errorf("sqliteBridge.init method not found")
-	}
-
-	// The bridge auto-initializes on load, so we just return success
-	return nil
-}
-
 // Open opens a database
-func (b *BridgeAdapter) Open(filename, vfs string) (string, error) {
+func (b *BridgeAdapter) Open(opts *Options) (string, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-
-	fmt.Printf("🔍 Bridge adapter opening database: filename=%s, vfs=%s\n", filename, vfs)
 
 	openMethod := b.bridge.Get("open")
 	if openMethod.IsUndefined() {
 		return "", fmt.Errorf("sqliteBridge.open method not found")
 	}
 
-	fmt.Println("🔍 Found sqliteBridge.open method, calling it...")
+	jsOpts := js.Global().Get("Object").New()
+	jsOpts.Set("file", opts.File)
+	jsOpts.Set("vfs", opts.VFS)
+	jsOpts.Set("busyTimeout", opts.BusyTimeout)
+	jsOpts.Set("mode", opts.Mode)
+	jsOpts.Set("cache", opts.Cache)
+	jsOpts.Set("journalMode", opts.JournalMode)
 
-	// Call the open method
-	result, err := b.callAsync(openMethod, filename, vfs)
+	pragmas := js.Global().Get("Array").New(len(opts.Pragma))
+	for i, pragma := range opts.Pragma {
+		pragmas.SetIndex(i, pragma)
+	}
+	jsOpts.Set("pragma", pragmas)
+
+	result, err := b.callAsync(openMethod, jsOpts)
 	if err != nil {
-		fmt.Printf("❌ Bridge open failed: %v\n", err)
 		return "", err
 	}
 
-	fmt.Printf("🔍 Bridge open result: %v\n", result)
-
-	// Extract VFS type from result
 	vfsType := "unknown"
 	if !result.IsUndefined() && !result.Get("vfsType").IsUndefined() {
 		vfsType = result.Get("vfsType").String()
-		fmt.Printf("✅ VFS type extracted: %s\n", vfsType)
-	} else {
-		fmt.Printf("⚠️ vfsType not found in result\n")
+	}
+	if !result.IsUndefined() && !result.Get("dbId").IsUndefined() {
+		b.dbID = result.Get("dbId").String()
+	}
+	if b.dbID == "" {
+		return "", fmt.Errorf("sqliteBridge.open did not return dbId")
 	}
 
 	return vfsType, nil
@@ -93,7 +88,7 @@ func (b *BridgeAdapter) Exec(sql string, params []interface{}) (int, int, error)
 		jsParams.SetIndex(i, b.toJSValue(param))
 	}
 
-	result, err := b.callAsync(execMethod, sql, jsParams)
+	result, err := b.callAsync(execMethod, b.dbID, sql, jsParams)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -130,7 +125,7 @@ func (b *BridgeAdapter) Query(sql string, params []interface{}) ([]string, [][]i
 		jsParams.SetIndex(i, b.toJSValue(param))
 	}
 
-	result, err := b.callAsync(queryMethod, sql, jsParams)
+	result, err := b.callAsync(queryMethod, b.dbID, sql, jsParams)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -169,6 +164,8 @@ func (b *BridgeAdapter) Query(sql string, params []interface{}) ([]string, [][]i
 							} else {
 								row[j] = num
 							}
+						} else if isUint8Array(val) {
+							row[j] = uint8ArrayToBytes(val)
 						} else if val.Type() == js.TypeString {
 							row[j] = val.String()
 						} else if val.Type() == js.TypeBoolean {
@@ -196,7 +193,7 @@ func (b *BridgeAdapter) Begin() error {
 		return fmt.Errorf("sqliteBridge.begin method not found")
 	}
 
-	_, err := b.callAsync(beginMethod)
+	_, err := b.callAsync(beginMethod, b.dbID)
 	return err
 }
 
@@ -210,7 +207,7 @@ func (b *BridgeAdapter) Commit() error {
 		return fmt.Errorf("sqliteBridge.commit method not found")
 	}
 
-	_, err := b.callAsync(commitMethod)
+	_, err := b.callAsync(commitMethod, b.dbID)
 	return err
 }
 
@@ -224,7 +221,7 @@ func (b *BridgeAdapter) Rollback() error {
 		return fmt.Errorf("sqliteBridge.rollback method not found")
 	}
 
-	_, err := b.callAsync(rollbackMethod)
+	_, err := b.callAsync(rollbackMethod, b.dbID)
 	return err
 }
 
@@ -238,7 +235,10 @@ func (b *BridgeAdapter) Close() error {
 		return fmt.Errorf("sqliteBridge.close method not found")
 	}
 
-	_, err := b.callAsync(closeMethod)
+	_, err := b.callAsync(closeMethod, b.dbID)
+	if err == nil {
+		b.dbID = ""
+	}
 	return err
 }
 
@@ -252,7 +252,7 @@ func (b *BridgeAdapter) Dump() (string, error) {
 		return "", fmt.Errorf("sqliteBridge.dump method not found")
 	}
 
-	result, err := b.callAsync(dumpMethod)
+	result, err := b.callAsync(dumpMethod, b.dbID)
 	if err != nil {
 		return "", err
 	}
@@ -278,8 +278,19 @@ func (b *BridgeAdapter) Load(dump string) error {
 		return fmt.Errorf("sqliteBridge.load method not found")
 	}
 
-	_, err := b.callAsync(loadMethod, dump)
+	_, err := b.callAsync(loadMethod, b.dbID, dump)
 	return err
+}
+
+func isUint8Array(val js.Value) bool {
+	uint8Array := js.Global().Get("Uint8Array")
+	return !uint8Array.IsUndefined() && val.InstanceOf(uint8Array)
+}
+
+func uint8ArrayToBytes(val js.Value) []byte {
+	bytes := make([]byte, val.Get("byteLength").Int())
+	js.CopyBytesToGo(bytes, val)
+	return bytes
 }
 
 // callAsync calls a JavaScript async function and waits for the result
@@ -361,7 +372,7 @@ func (b *BridgeAdapter) callAsync(method js.Value, args ...interface{}) (js.Valu
 					errorMsg = error.String()
 				}
 			}
-			fmt.Printf("🔍 JavaScript error details: %s\n", errorMsg)
+			fmt.Printf("JavaScript error details: %s\n", errorMsg)
 		}
 
 		done <- struct {
@@ -385,7 +396,7 @@ func (b *BridgeAdapter) toJSValue(v interface{}) js.Value {
 	if v == nil {
 		return js.Null()
 	}
-	
+
 	// Handle common database types
 	switch val := v.(type) {
 	case nil:

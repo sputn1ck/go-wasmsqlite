@@ -1,0 +1,324 @@
+// Dedicated SQLite worker using the supported sqlite3.oo1 API directly.
+
+let sqlite3;
+let nextDbId = 1;
+const dbs = new Map();
+const openOPFSFiles = new Map();
+
+function normalizeError(error) {
+  if (!error) return "unknown sqlite worker error";
+  if (error.stack) return error.stack;
+  if (error.message) return error.message;
+  return String(error);
+}
+
+function vfsList() {
+  return sqlite3.capi.sqlite3_js_vfs_list();
+}
+
+function hasVFS(name) {
+  return !!sqlite3.capi.sqlite3_vfs_find(name);
+}
+
+async function ensureSQLite() {
+  if (sqlite3) return sqlite3;
+
+  importScripts("sqlite3.js");
+  sqlite3 = await sqlite3InitModule();
+
+  if (sqlite3.installOpfsSAHPoolVfs && !hasVFS("opfs-sahpool")) {
+    await sqlite3.installOpfsSAHPoolVfs({ name: "opfs-sahpool" }).catch((error) => {
+      sqlite3.config.warn("Ignoring inability to install opfs-sahpool:", error.message);
+    });
+  }
+
+  return sqlite3;
+}
+
+function openFlags(mode) {
+  switch ((mode || "rwc").toLowerCase()) {
+    case "ro":
+      return "r";
+    case "rw":
+      return "w";
+    case "rwc":
+    case "memory":
+    default:
+      return "c";
+  }
+}
+
+function normalizeFilename(file) {
+  if (!file || file === ":memory:") return ":memory:";
+  return file;
+}
+
+function normalizeOPFSFilename(file) {
+  if (file.startsWith("/") || file.startsWith("file:")) return file;
+  return `/${file}`;
+}
+
+function makeURI(filename, params) {
+  const pairs = [];
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value === undefined || value === null || value === "") continue;
+    pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+  }
+  if (!pairs.length) return filename;
+  const sep = filename.includes("?") ? "&" : "?";
+  return `${filename}${sep}${pairs.join("&")}`;
+}
+
+function quoteIdentifier(identifier) {
+  return `"${String(identifier).replace(/"/g, '""')}"`;
+}
+
+function sqlLiteral(value) {
+  if (value === null || value === undefined) return "NULL";
+  if (value instanceof Uint8Array) {
+    let hex = "";
+    for (const byte of value) hex += byte.toString(16).padStart(2, "0");
+    return `X'${hex}'`;
+  }
+  if (value instanceof ArrayBuffer) return sqlLiteral(new Uint8Array(value));
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return "NULL";
+    return String(value);
+  }
+  if (typeof value === "bigint") return String(value);
+  if (typeof value === "boolean") return value ? "1" : "0";
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+function normalizeValue(value) {
+  if (typeof value === "bigint") {
+    const asNumber = Number(value);
+    if (Number.isSafeInteger(asNumber)) return asNumber;
+    return value.toString();
+  }
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  return value;
+}
+
+function bindParams(stmt, params) {
+  if (!params || !params.length) return;
+  stmt.bind(params.map(normalizeValue));
+}
+
+function getDB(dbId) {
+  const db = dbs.get(dbId);
+  if (!db) throw new Error(`database is not open: ${dbId}`);
+  return db;
+}
+
+function runQuery(db, sql, params) {
+  const stmt = db.prepare(sql);
+  try {
+    bindParams(stmt, params);
+    const columnNames = stmt.columnCount ? stmt.getColumnNames([]) : [];
+    const resultRows = [];
+    while (stmt.step()) {
+      const row = stmt.get([]);
+      resultRows.push(row.map(normalizeValue));
+    }
+    return { columnNames, resultRows };
+  } finally {
+    stmt.finalize();
+  }
+}
+
+function runExec(db, sql, params) {
+  const beforeChanges = db.changes(true);
+  const options = { sql };
+  if (params && params.length) options.bind = params.map(normalizeValue);
+  db.exec(options);
+
+  return {
+    rowsAffected: db.changes(true) - beforeChanges,
+    lastInsertId: Number(sqlite3.capi.sqlite3_last_insert_rowid(db.pointer))
+  };
+}
+
+async function init() {
+  await ensureSQLite();
+  return { version: sqlite3.version, vfsList: vfsList() };
+}
+
+async function open(args) {
+  await ensureSQLite();
+
+  const requestedVFS = args.vfs || "opfs";
+  let filename = normalizeFilename(args.file || args.filename || "/app.db");
+  let vfs = requestedVFS;
+  let persistent = false;
+  let db;
+
+  const uriParams = {};
+  if (args.cache) uriParams.cache = args.cache;
+
+  if (filename === ":memory:" || requestedVFS === "memory") {
+    filename = ":memory:";
+    vfs = "memory";
+    db = new sqlite3.oo1.DB(filename, openFlags(args.mode));
+  } else if (requestedVFS === "opfs") {
+    if (sqlite3.oo1.OpfsDb && hasVFS("opfs")) {
+      filename = normalizeOPFSFilename(filename);
+      const resolved = makeURI(filename, uriParams);
+      const duplicateKey = `opfs:${resolved}`;
+      if (openOPFSFiles.has(duplicateKey)) {
+        throw new Error(`OPFS database already open in this worker: ${resolved}`);
+      }
+      db = new sqlite3.oo1.OpfsDb(resolved, openFlags(args.mode));
+      filename = db.dbFilename();
+      vfs = db.dbVfsName() || "opfs";
+      persistent = true;
+      openOPFSFiles.set(duplicateKey, true);
+      db.__opfsKey = duplicateKey;
+    } else {
+      sqlite3.config.warn("OPFS VFS unavailable, falling back to :memory:");
+      filename = ":memory:";
+      vfs = "memory";
+      db = new sqlite3.oo1.DB(filename, openFlags(args.mode));
+    }
+  } else {
+    if (requestedVFS === "opfs-sahpool" && sqlite3.installOpfsSAHPoolVfs && !hasVFS("opfs-sahpool")) {
+      await sqlite3.installOpfsSAHPoolVfs({ name: "opfs-sahpool" });
+    }
+    if (!hasVFS(requestedVFS)) {
+      throw new Error(`requested SQLite VFS is unavailable: ${requestedVFS}`);
+    }
+    if (requestedVFS === "opfs-sahpool") {
+      filename = normalizeOPFSFilename(filename);
+    }
+    const resolved = makeURI(filename, { ...uriParams, vfs: requestedVFS });
+    const duplicateKey = requestedVFS.startsWith("opfs") ? `${requestedVFS}:${resolved}` : "";
+    if (duplicateKey && openOPFSFiles.has(duplicateKey)) {
+      throw new Error(`OPFS database already open in this worker: ${resolved}`);
+    }
+    db = new sqlite3.oo1.DB({ filename: resolved, flags: openFlags(args.mode), vfs: requestedVFS });
+    filename = db.dbFilename();
+    vfs = db.dbVfsName() || requestedVFS;
+    persistent = requestedVFS.startsWith("opfs");
+    if (duplicateKey) {
+      openOPFSFiles.set(duplicateKey, true);
+      db.__opfsKey = duplicateKey;
+    }
+  }
+
+  if (args.busyTimeout > 0) {
+    sqlite3.capi.sqlite3_busy_timeout(db.pointer, args.busyTimeout);
+  }
+  if (args.journalMode) {
+    db.exec(`PRAGMA journal_mode=${args.journalMode}`);
+  }
+  for (const pragma of args.pragma || []) {
+    if (pragma) db.exec(`PRAGMA ${pragma}`);
+  }
+
+  const dbId = `db${nextDbId++}`;
+  dbs.set(dbId, db);
+
+  return { dbId, filename, vfs, persistent };
+}
+
+async function exec(args) {
+  const db = getDB(args.dbId);
+  return runExec(db, args.sql, args.params || []);
+}
+
+async function query(args) {
+  const db = getDB(args.dbId);
+  return runQuery(db, args.sql, args.params || []);
+}
+
+async function begin(args) {
+  getDB(args.dbId).exec("BEGIN IMMEDIATE");
+  return {};
+}
+
+async function commit(args) {
+  getDB(args.dbId).exec("COMMIT");
+  return {};
+}
+
+async function rollback(args) {
+  getDB(args.dbId).exec("ROLLBACK");
+  return {};
+}
+
+async function close(args) {
+  const db = dbs.get(args.dbId);
+  if (!db) return {};
+
+  if (db.__opfsKey) openOPFSFiles.delete(db.__opfsKey);
+  db.close();
+  dbs.delete(args.dbId);
+  return {};
+}
+
+async function dump(args) {
+  const db = getDB(args.dbId);
+  let dumpSQL = "BEGIN TRANSACTION;\n";
+
+  const schemaRows = runQuery(
+    db,
+    "SELECT type, name, tbl_name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' ORDER BY tbl_name, type DESC, name",
+    []
+  ).resultRows;
+  for (const row of schemaRows) {
+    dumpSQL += `${row[3]};\n`;
+  }
+
+  const tableRows = runQuery(
+    db,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    []
+  ).resultRows;
+  for (const [tableName] of tableRows) {
+    const columns = runQuery(db, `PRAGMA table_info(${quoteIdentifier(tableName)})`, [])
+      .resultRows
+      .map((row) => row[1]);
+    const rows = runQuery(db, `SELECT * FROM ${quoteIdentifier(tableName)}`, []).resultRows;
+    for (const row of rows) {
+      dumpSQL += `INSERT INTO ${quoteIdentifier(tableName)} (${columns.map(quoteIdentifier).join(", ")}) VALUES (${row.map(sqlLiteral).join(", ")});\n`;
+    }
+  }
+
+  dumpSQL += "COMMIT;\n";
+  return { dump: dumpSQL };
+}
+
+async function load(args) {
+  const db = getDB(args.dbId);
+  const tables = runQuery(
+    db,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+    []
+  ).resultRows;
+  db.exec("PRAGMA foreign_keys=OFF");
+  try {
+    for (const [tableName] of tables) {
+      db.exec(`DROP TABLE IF EXISTS ${quoteIdentifier(tableName)}`);
+    }
+    db.exec(args.sql || "");
+  } catch (error) {
+    throw error;
+  } finally {
+    db.exec("PRAGMA foreign_keys=ON");
+  }
+  return {};
+}
+
+const methods = { init, open, exec, query, begin, commit, rollback, close, dump, load };
+
+globalThis.onmessage = async (event) => {
+  const message = event.data || {};
+  try {
+    const method = methods[message.method];
+    if (!method) throw new Error(`unknown sqlite worker method: ${message.method}`);
+    const result = await method(message.args || {});
+    globalThis.postMessage({ id: message.id, ok: true, result });
+  } catch (error) {
+    globalThis.postMessage({ id: message.id, ok: false, error: normalizeError(error) });
+  }
+};
