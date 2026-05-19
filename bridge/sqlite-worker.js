@@ -145,11 +145,45 @@ function normalizeNamedParams(stmt, params) {
   return normalized;
 }
 
+function numericParamIndex(name) {
+  const match = String(name || "").match(/^[:@$?]([1-9][0-9]*)$/);
+  if (!match) return 0;
+  return Number(match[1]);
+}
+
+function normalizePositionalParams(stmt, params) {
+  if (!params.length) return params;
+
+  const normalized = [];
+  const usedParamIndexes = new Set();
+
+  for (let i = 1; i <= stmt.parameterCount; i++) {
+    const bindName = stmt.getParamName(i);
+    const numericIndex = numericParamIndex(bindName);
+    const paramIndex = numericIndex ? numericIndex - 1 : i - 1;
+
+    if (paramIndex < 0 || paramIndex >= params.length) {
+      throw new Error(`missing SQL parameter for ${bindName || `?${i}`}`);
+    }
+
+    normalized.push(normalizeValue(params[paramIndex]));
+    usedParamIndexes.add(paramIndex);
+  }
+
+  for (let i = 0; i < params.length; i++) {
+    if (!usedParamIndexes.has(i)) {
+      throw new Error(`unused SQL parameter at index ${i + 1}`);
+    }
+  }
+
+  return normalized;
+}
+
 function bindParams(stmt, params) {
   if (!params) return;
   if (Array.isArray(params)) {
     if (!params.length) return;
-    stmt.bind(params.map(normalizeValue));
+    stmt.bind(normalizePositionalParams(stmt, params));
     return;
   }
 

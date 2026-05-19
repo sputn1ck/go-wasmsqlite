@@ -176,6 +176,154 @@ func TestBrowserNamedParametersE2E(t *testing.T) {
 	}
 }
 
+func TestBrowserUpdateReturningWithNumberedParamsAndSubqueryE2E(t *testing.T) {
+	db, err := Open(&Options{File: ":memory:", VFS: "memory"})
+	if err != nil {
+		t.Fatalf("open memory db: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`
+CREATE TABLE mailbox_messages (
+	id INTEGER PRIMARY KEY,
+	mailbox_id TEXT NOT NULL,
+	correlation_key TEXT,
+	lease_token TEXT,
+	lease_until TEXT,
+	attempts INTEGER NOT NULL DEFAULT 0,
+	max_attempts INTEGER NOT NULL,
+	available_at TEXT NOT NULL,
+	created_at TEXT NOT NULL,
+	priority INTEGER NOT NULL
+);
+`); err != nil {
+		t.Fatalf("create mailbox_messages schema: %v", err)
+	}
+
+	seedRows := []struct {
+		id             int
+		mailboxID      string
+		correlationKey sql.NullString
+		attempts       int
+		maxAttempts    int
+		availableAt    string
+		createdAt      string
+		priority       int
+	}{
+		{
+			id:             1,
+			mailboxID:      "mailbox-a",
+			correlationKey: sql.NullString{String: "group-a", Valid: true},
+			attempts:       0,
+			maxAttempts:    3,
+			availableAt:    "2026-05-19T08:00:00Z",
+			createdAt:      "2026-05-19T08:00:00Z",
+			priority:       5,
+		},
+		{
+			id:             2,
+			mailboxID:      "mailbox-a",
+			correlationKey: sql.NullString{String: "group-a", Valid: true},
+			attempts:       0,
+			maxAttempts:    3,
+			availableAt:    "2026-05-19T08:01:00Z",
+			createdAt:      "2026-05-19T08:01:00Z",
+			priority:       10,
+		},
+		{
+			id:             3,
+			mailboxID:      "mailbox-a",
+			correlationKey: sql.NullString{},
+			attempts:       0,
+			maxAttempts:    3,
+			availableAt:    "2026-05-19T08:02:00Z",
+			createdAt:      "2026-05-19T08:02:00Z",
+			priority:       1,
+		},
+		{
+			id:             4,
+			mailboxID:      "mailbox-b",
+			correlationKey: sql.NullString{},
+			attempts:       0,
+			maxAttempts:    3,
+			availableAt:    "2026-05-19T08:00:00Z",
+			createdAt:      "2026-05-19T08:00:00Z",
+			priority:       100,
+		},
+	}
+	for _, row := range seedRows {
+		if _, err := db.Exec(`
+INSERT INTO mailbox_messages (
+	id, mailbox_id, correlation_key, attempts, max_attempts,
+	available_at, created_at, priority
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			row.id,
+			row.mailboxID,
+			row.correlationKey,
+			row.attempts,
+			row.maxAttempts,
+			row.availableAt,
+			row.createdAt,
+			row.priority,
+		); err != nil {
+			t.Fatalf("insert mailbox row %d: %v", row.id, err)
+		}
+	}
+
+	const claimNextMessage = `
+UPDATE mailbox_messages
+SET
+    lease_token = $2,
+    lease_until = $3,
+    attempts = attempts + 1
+WHERE mailbox_messages.id = (
+    SELECT m.id FROM mailbox_messages m
+    WHERE m.mailbox_id = $1
+      AND m.available_at <= $4
+      AND (m.lease_until IS NULL OR m.lease_until < $4)
+      AND m.attempts < m.max_attempts
+      AND (
+          m.correlation_key IS NULL
+          OR NOT EXISTS (
+              SELECT 1 FROM mailbox_messages m2
+              WHERE m2.mailbox_id = m.mailbox_id
+                AND m2.correlation_key = m.correlation_key
+                AND m2.id < m.id
+                AND m2.attempts < m2.max_attempts
+          )
+      )
+    ORDER BY m.priority DESC, m.available_at ASC, m.created_at ASC
+    LIMIT 1
+)
+RETURNING id, mailbox_id, lease_token, lease_until, attempts;`
+
+	var (
+		id         int
+		mailboxID  string
+		leaseToken string
+		leaseUntil string
+		attempts   int
+	)
+	err = db.QueryRow(
+		claimNextMessage,
+		"mailbox-a",
+		"lease-1",
+		"2026-05-19T09:00:00Z",
+		"2026-05-19T08:30:00Z",
+	).Scan(&id, &mailboxID, &leaseToken, &leaseUntil, &attempts)
+	if err != nil {
+		t.Fatalf("claim next mailbox message: %v", err)
+	}
+
+	if id != 1 || mailboxID != "mailbox-a" || leaseToken != "lease-1" ||
+		leaseUntil != "2026-05-19T09:00:00Z" || attempts != 1 {
+		t.Fatalf(
+			"unexpected claimed row: id=%d mailbox=%q token=%q until=%q attempts=%d",
+			id, mailboxID, leaseToken, leaseUntil, attempts,
+		)
+	}
+}
+
 func TestBrowserProtocolMetadataE2E(t *testing.T) {
 	bridgeProtocol := js.Global().Get("sqliteBridge").Get("protocolVersion")
 	if bridgeProtocol.IsUndefined() {
