@@ -53,3 +53,6 @@ test-results/
 
 # Conductor (old experiments)
 .conductor/
+
+# Local Netlify folder
+.netlify

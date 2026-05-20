@@ -346,6 +346,7 @@ The Pages workflow runs `make build-example` and publishes `./example`. The publ
 
 - `index.html`
 - `enable-threads.js`
+- `_headers`
 - `main.wasm`
 - `wasm_exec.js`
 - `sqlite-bridge.js`
@@ -355,6 +356,15 @@ The Pages workflow runs `make build-example` and publishes `./example`. The publ
 - `sqlite3-opfs-async-proxy.js`
 
 `enable-threads.js` is loaded before the Go WASM app. On static hosts without COOP/COEP response headers, it registers a service worker, reloads the page, and makes the page cross-origin isolated so OPFS can work.
+
+## Netlify
+
+The CI workflow deploys `./example` to `go-wasmsqlite-demo` after compile, browser, and Playwright jobs pass on `main`. Netlify applies `example/_headers` to static assets, so the deployed demo receives real COOP/COEP/CORP headers instead of relying on the service-worker header shim.
+
+Repository secrets required for deployment:
+
+- `NETLIFY_AUTH_TOKEN`: Netlify personal access token with deploy access to the site.
+- `NETLIFY_SITE_ID`: Netlify site id for the demo site.
 
 ## Limitations
 
