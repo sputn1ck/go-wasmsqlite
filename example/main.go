@@ -160,6 +160,9 @@ func publishDemoRuntimeInfo(db *sql.DB, cfg demoDBConfig) {
 	info.Set("vfsType", string(vfsType))
 	info.Set("persistent", vfsType != wasmsqlite.VFSTypeMemory && vfsType != wasmsqlite.VFSTypeUnknown)
 	js.Global().Set("wasmsqliteDemoInfo", info)
+	eventInit := js.Global().Get("Object").New()
+	eventInit.Set("detail", info)
+	js.Global().Call("dispatchEvent", js.Global().Get("CustomEvent").New("wasmsqlite-demo-info", eventInit))
 }
 
 func runMigrations(db *sql.DB) error {

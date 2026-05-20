@@ -83,6 +83,75 @@
             background: #fed7d7;
             color: #c53030;
         }
+        .storage-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .storage-field {
+            background: white;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px;
+        }
+        .storage-field span {
+            color: #4a5568;
+            display: block;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+        .storage-field strong {
+            color: #1a202c;
+            display: block;
+            overflow-wrap: anywhere;
+        }
+        .storage-links {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+        .storage-links a {
+            background: #edf2f7;
+            border: 1px solid #cbd5e0;
+            border-radius: 6px;
+            color: #2d3748;
+            font-weight: 700;
+            padding: 8px 10px;
+            text-decoration: none;
+        }
+        .storage-links a.active {
+            background: #2b6cb0;
+            border-color: #2b6cb0;
+            color: white;
+        }
+        .storage-note {
+            background: #ebf8ff;
+            border: 1px solid #bee3f8;
+            border-radius: 6px;
+            color: #2c5282;
+            margin-top: 12px;
+            padding: 10px;
+        }
+        .storage-note.warning {
+            background: #fff5f5;
+            border-color: #feb2b2;
+            color: #9b2c2c;
+        }
+        @media (max-width: 640px) {
+            body {
+                padding: 12px;
+            }
+            .storage-grid {
+                grid-template-columns: 1fr;
+            }
+            .storage-links a {
+                flex: 1 1 140px;
+                text-align: center;
+            }
+        }
     </style>
 </head>
 <body>
@@ -98,6 +167,44 @@
 
     <div id="status" class="status loading">
         🔄 Loading WebAssembly...
+    </div>
+
+    <div class="container">
+        <h2>Storage Mode</h2>
+        <div class="storage-grid">
+            <div class="storage-field">
+                <span>Used VFS</span>
+                <strong id="activeVFS">loading</strong>
+            </div>
+            <div class="storage-field">
+                <span>Requested VFS</span>
+                <strong id="requestedVFS">loading</strong>
+            </div>
+            <div class="storage-field">
+                <span>Persistent</span>
+                <strong id="persistentStatus">loading</strong>
+            </div>
+            <div class="storage-field">
+                <span>Database</span>
+                <strong id="databaseFile">loading</strong>
+            </div>
+            <div class="storage-field">
+                <span>Cross-Origin Isolated</span>
+                <strong id="isolationStatus">loading</strong>
+            </div>
+            <div class="storage-field">
+                <span>Atomics.waitAsync</span>
+                <strong id="atomicsStatus">loading</strong>
+            </div>
+        </div>
+        <div id="storageNote" class="storage-note">Waiting for the Go WASM database to open.</div>
+        <div class="storage-links" id="storageLinks">
+            <a data-vfs="opfs" data-db="/demo-opfs.db" href="?vfs=opfs&db=%2Fdemo-opfs.db">OPFS</a>
+            <a data-vfs="opfs" data-db="/demo-opfs-required.db" data-require="true" href="?vfs=opfs&db=%2Fdemo-opfs-required.db&require_persistent=true">OPFS required</a>
+            <a data-vfs="opfs-wl" data-db="/demo-opfs-wl.db" data-require="true" href="?vfs=opfs-wl&db=%2Fdemo-opfs-wl.db&require_persistent=true">OPFS Web Locks</a>
+            <a data-vfs="opfs-sahpool" data-db="/demo-sahpool.db" data-require="true" href="?vfs=opfs-sahpool&db=%2Fdemo-sahpool.db&require_persistent=true">OPFS SAH pool</a>
+            <a data-vfs="memory" data-db=":memory:" href="?vfs=memory&db=%3Amemory%3A">Memory</a>
+        </div>
     </div>
     
 
@@ -175,6 +282,15 @@ Loading WebAssembly module...</div>
         let wasmReady = false;
         const output = document.getElementById('output');
         const status = document.getElementById('status');
+        const storageFields = {
+            activeVFS: document.getElementById('activeVFS'),
+            requestedVFS: document.getElementById('requestedVFS'),
+            persistentStatus: document.getElementById('persistentStatus'),
+            databaseFile: document.getElementById('databaseFile'),
+            isolationStatus: document.getElementById('isolationStatus'),
+            atomicsStatus: document.getElementById('atomicsStatus'),
+            storageNote: document.getElementById('storageNote')
+        };
 
         // Redirect console.log to our output div
         const originalLog = console.log;
@@ -184,6 +300,60 @@ Loading WebAssembly module...</div>
             output.scrollTop = output.scrollHeight;
             originalLog.apply(console, args);
         };
+
+        function currentQuery() {
+            return new URLSearchParams(window.location.search);
+        }
+
+        function configuredValue(key, fallback) {
+            return currentQuery().get(key) || fallback;
+        }
+
+        function boolText(value) {
+            return value ? "yes" : "no";
+        }
+
+        function renderStorageInfo(info) {
+            const requestedVFS = info?.configuredVFS || configuredValue("vfs", "opfs");
+            const activeVFS = info?.vfsType || "opening";
+            const configuredFile = info?.configuredFile || configuredValue("db", "/demo.db");
+            const persistent = !!info?.persistent;
+            const isMemory = activeVFS === "memory";
+            const atomicsWaitAsync = typeof Atomics.waitAsync === "function";
+
+            storageFields.activeVFS.textContent = activeVFS;
+            storageFields.requestedVFS.textContent = requestedVFS;
+            storageFields.persistentStatus.textContent = boolText(persistent);
+            storageFields.databaseFile.textContent = configuredFile;
+            storageFields.isolationStatus.textContent = boolText(window.crossOriginIsolated);
+            storageFields.atomicsStatus.textContent = boolText(atomicsWaitAsync);
+
+            storageFields.storageNote.classList.toggle("warning", isMemory || activeVFS === "unknown");
+            if (isMemory) {
+                storageFields.storageNote.textContent = `Actually using memory. Requested ${requestedVFS}, but persistent OPFS storage was not available in this browser context.`;
+            } else if (activeVFS === "opfs-wl") {
+                storageFields.storageNote.textContent = "Actually using OPFS Web Locks. This is the preferred option to try for multi-tab behavior when Atomics.waitAsync is available.";
+            } else if (activeVFS === "opfs-sahpool") {
+                storageFields.storageNote.textContent = "Actually using SQLite's OPFS SAH pool VFS. This is useful to compare the explicit SAH pool path.";
+            } else if (activeVFS === "opfs") {
+                storageFields.storageNote.textContent = "Actually using persistent OPFS.";
+            } else if (activeVFS === "unknown") {
+                storageFields.storageNote.textContent = "The database opened, but the demo could not determine the active VFS.";
+            } else {
+                storageFields.storageNote.textContent = `Actually using ${activeVFS}.`;
+            }
+
+            document.querySelectorAll("#storageLinks a").forEach((link) => {
+                const linkVFS = link.dataset.vfs;
+                link.classList.toggle("active", activeVFS === linkVFS);
+            });
+        }
+
+        window.addEventListener("wasmsqlite-demo-info", (event) => {
+            renderStorageInfo(event.detail);
+        });
+
+        renderStorageInfo(window.wasmsqliteDemoInfo);
 
         // Load WASM
         async function loadWasm() {
